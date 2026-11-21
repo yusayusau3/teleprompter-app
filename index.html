@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>テレプロンプター</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body { background: #000; color: #fff; }
+    .app { display: flex; flex-direction: column; height: 100dvh; min-height: 380px; background: #000; }
+    .controls { z-index: 2; padding: 12px clamp(12px, 2vw, 28px); background: #171717; border-bottom: 1px solid #444; }
+    .topline, .settings, .buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+    .topline { justify-content: space-between; margin-bottom: 12px; }
+    h1 { margin: 0; font-size: 1.15rem; font-weight: 700; }
+    .hint, .status { color: #c5c5c5; font-size: .86rem; }
+    .status { min-height: 1.2em; margin: 8px 0 0; }
+    .settings { margin-top: 12px; }
+    .setting { display: inline-flex; align-items: center; gap: 8px; font-size: .9rem; }
+    .setting input[type="range"] { width: clamp(95px, 15vw, 180px); accent-color: #fff; }
+    .setting output { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+    .mirror { cursor: pointer; }
+    .mirror input { width: 17px; height: 17px; accent-color: #fff; vertical-align: middle; }
+    button { min-height: 40px; padding: 7px 14px; border: 1px solid #777; border-radius: 7px; background: #292929; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button:hover { background: #3a3a3a; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #7bb9ff; outline-offset: 2px; }
+    .primary { background: #fff; border-color: #fff; color: #000; }
+    .primary:hover { background: #ddd; }
+    button:disabled { opacity: .45; cursor: default; }
+    .editor { padding: 14px clamp(12px, 2vw, 28px); background: #101010; border-bottom: 1px solid #333; }
+    .editor label { display: block; margin-bottom: 7px; font-weight: 600; }
+    textarea { display: block; width: 100%; min-height: 125px; max-height: 32vh; resize: vertical; padding: 10px 12px; border: 1px solid #777; border-radius: 7px; background: #080808; color: #fff; font-family: inherit; font-size: 1rem; line-height: 1.6; }
+    .reading .editor { display: none; }
+    .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; }
+    .stage::before { content: ""; position: absolute; z-index: 1; top: 40%; left: 0; right: 0; height: 2px; background: #a8b76c; opacity: .85; pointer-events: none; }
+    .script { position: absolute; top: 0; left: 50%; width: min(90%, 1100px); margin: 0; padding: 0 0 1em; color: #fff; font-size: 56px; font-weight: 600; line-height: 2; letter-spacing: .025em; text-align: center; white-space: pre-wrap; overflow-wrap: anywhere; transform: translate(-50%, var(--offset, 0px)) scaleX(var(--mirror, 1)); will-change: transform; }
+    .stage.mirrored .script { --mirror: -1; }
+    .placeholder { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: #999; text-align: center; font-size: clamp(20px, 3vw, 30px); pointer-events: none; }
+    .stage.has-script .placeholder { display: none; }
+    :fullscreen.app { height: 100%; }
+    :fullscreen .editor { display: none; }
+    @media (max-width: 600px) {
+      .hint { display: none; }
+      .controls { padding-top: 9px; padding-bottom: 9px; }
+      .topline { margin-bottom: 8px; }
+      .settings { gap: 8px 15px; }
+      button { padding-inline: 10px; }
+      .script { width: 94%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" id="app">
+    <section class="controls" aria-label="操作パネル">
+      <div class="topline"><h1>テレプロンプター</h1><span class="hint">スペースキーでスタート／一時停止</span></div>
+      <div class="buttons">
+        <button class="primary" id="start" type="button">スタート</button>
+        <button id="pause" type="button" disabled>一時停止</button>
+        <button id="reset" type="button">先頭に戻す</button>
+        <button id="edit" type="button">原稿を閉じる</button>
+        <button id="fullscreen" type="button">全画面表示</button>
+      </div>
+      <div class="settings">
+        <label class="setting" for="speed">速度 <input id="speed" type="range" min="20" max="200" step="5" value="60"><output id="speedValue" for="speed">60</output><span>px/秒</span></label>
+        <label class="setting" for="size">文字サイズ <input id="size" type="range" min="28" max="100" step="2" value="56"><output id="sizeValue" for="size">56</output><span>px</span></label>
+        <label class="setting mirror" for="mirror"><input id="mirror" type="checkbox"> ミラー表示</label>
+      </div>
+      <p class="status" id="status" role="status" aria-live="polite">原稿を入力してスタートしてください。</p>
+    </section>
+    <section class="editor" id="editor">
+      <label for="manuscript">原稿</label>
+      <textarea id="manuscript" placeholder="ここに原稿を貼り付けてください" spellcheck="false"></textarea>
+    </section>
+    <section class="stage" id="stage" aria-label="原稿表示エリア">
+      <div class="placeholder">原稿を入力すると、ここに表示されます。</div>
+      <div class="script" id="script"></div>
+    </section>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+      const $ = id => document.getElementById(id);
+      const app = $('app'), stage = $('stage'), script = $('script');
+      const manuscript = $('manuscript'), speed = $('speed'), size = $('size');
+      const startButton = $('start'), pauseButton = $('pause'), editButton = $('edit');
+      const fullscreenButton = $('fullscreen'), status = $('status');
+      const speedValue = $('speedValue'), sizeValue = $('sizeValue');
+      const storageKey = 'teleprompter-manuscript';
+      let position = null, atStart = true, running = false, previousTime = null, frame = null;
+
+      function setStatus(message) { status.textContent = message; }
+      function setEditorOpen(open) {
+        app.classList.toggle('reading', !open);
+        editButton.textContent = open ? '原稿を閉じる' : '原稿を編集';
+      }
+      function showManuscript() {
+        script.textContent = manuscript.value;
+        stage.classList.toggle('has-script', Boolean(manuscript.value.trim()));
+      }
+      function renderPosition() { script.style.setProperty('--offset', `${position ?? stage.clientHeight}px`); }
+      function resetPosition() {
+        position = stage.clientHeight;
+        atStart = true;
+        renderPosition();
+      }
+      function stop() {
+        running = false;
+        previousTime = null;
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        startButton.disabled = false;
+        pauseButton.disabled = true;
+      }
+      function tick(time) {
+        if (!running) return;
+        if (previousTime !== null) {
+          // Long delays (for example, switching tabs) must not skip the manuscript.
+          const elapsed = Math.min((time - previousTime) / 1000, 0.1);
+          position -= Number(speed.value) * elapsed;
+          atStart = false;
+          renderPosition();
+        }
+        previousTime = time;
+        if (position < -script.offsetHeight) {
+          stop();
+          setStatus('最後まで表示しました。');
+          return;
+        }
+        frame = requestAnimationFrame(tick);
+      }
+      function start() {
+        if (running) return;
+        if (!manuscript.value.trim()) {
+          setStatus('原稿を入力してください。');
+          setEditorOpen(true);
+          manuscript.focus();
+          return;
+        }
+        setEditorOpen(false);
+        if (atStart || position === null || position < -script.offsetHeight) resetPosition();
+        running = true;
+        previousTime = null;
+        startButton.disabled = true;
+        pauseButton.disabled = false;
+        setStatus('再生中');
+        frame = requestAnimationFrame(tick);
+      }
+      function pause() {
+        if (!running) return;
+        stop();
+        setStatus('一時停止中');
+      }
+      function updateText() {
+        showManuscript();
+        stop();
+        resetPosition();
+        try { localStorage.setItem(storageKey, manuscript.value); }
+        catch (_) { setStatus('ブラウザの保存機能を使用できません。'); return; }
+        setStatus(manuscript.value.trim() ? '原稿を保存しました。' : '原稿を入力してスタートしてください。');
+      }
+
+      try { manuscript.value = localStorage.getItem(storageKey) || ''; }
+      catch (_) { setStatus('ブラウザの保存機能を使用できません。'); }
+      showManuscript();
+      speedValue.value = speed.value;
+      sizeValue.value = size.value;
+      script.style.fontSize = `${size.value}px`;
+      resetPosition();
+
+      manuscript.addEventListener('input', updateText);
+      startButton.addEventListener('click', start);
+      pauseButton.addEventListener('click', pause);
+      $('reset').addEventListener('click', () => {
+        stop();
+        resetPosition();
+        setStatus('先頭に戻しました。');
+      });
+      editButton.addEventListener('click', () => {
+        const opening = app.classList.contains('reading');
+        if (opening) pause();
+        setEditorOpen(opening);
+        if (atStart) resetPosition();
+        if (opening) manuscript.focus();
+      });
+      speed.addEventListener('input', () => { speedValue.value = speed.value; });
+      size.addEventListener('input', () => {
+        sizeValue.value = size.value;
+        script.style.fontSize = `${size.value}px`;
+      });
+      $('mirror').addEventListener('change', event => {
+        stage.classList.toggle('mirrored', event.target.checked);
+      });
+      fullscreenButton.addEventListener('click', async () => {
+        try {
+          if (document.fullscreenElement) await document.exitFullscreen();
+          else await app.requestFullscreen();
+        } catch (_) { setStatus('このブラウザでは全画面表示を開始できません。'); }
+      });
+      document.addEventListener('fullscreenchange', () => {
+        fullscreenButton.textContent = document.fullscreenElement ? '全画面を終了' : '全画面表示';
+      });
+      document.addEventListener('keydown', event => {
+        if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.isContentEditable || ['TEXTAREA', 'INPUT', 'BUTTON', 'SELECT'].includes(target.tagName))) return;
+        event.preventDefault();
+        running ? pause() : start();
+      });
+      window.addEventListener('resize', () => {
+        if (atStart) resetPosition();
+      });
+    })();
+  </script>
+</body>
+</html>
